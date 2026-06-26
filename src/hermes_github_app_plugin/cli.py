@@ -15,7 +15,7 @@ from typing import Any, NoReturn
 
 import httpx
 
-from .auth import GitHubAppAuth, auth_metadata
+from .auth import GitHubAppAuth, auth_metadata, requires_app_jwt
 from .config import ConfigurationError, load_config, write_github_app_config
 
 
@@ -253,7 +253,11 @@ def _token(repo: str | None, *, json_output: bool) -> int:
 
 
 def _api(method: str, path: str, *, repo: str | None, body: dict[str, Any] | None) -> int:
-    result = GitHubAppAuth(load_config()).request(method, path, repo=repo, json_body=body)
+    auth = GitHubAppAuth(load_config())
+    if requires_app_jwt(path):
+        result = auth.app_request(method, path, json_body=body)
+    else:
+        result = auth.request(method, path, repo=repo, json_body=body)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

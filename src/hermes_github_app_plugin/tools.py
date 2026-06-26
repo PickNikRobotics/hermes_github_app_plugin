@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from .auth import GitHubAppAuth, auth_metadata
+from .auth import GitHubAppAuth, auth_metadata, requires_app_jwt
 from .config import ConfigurationError, load_config
 
 
@@ -55,7 +55,7 @@ def github_app_verify_identity(params: dict[str, Any], **_: Any) -> str:
         repo = _repo(params)
         auth = _auth()
         token = auth.get_installation_token(force_refresh=True)
-        app = auth.request("GET", "/app")
+        app = auth.app_request("GET", "/app")
         repo_probe = auth.request("GET", f"/repos/{repo}", repo=repo) if repo else None
         return {
             "auth": auth_metadata(token, repo=repo),
@@ -75,7 +75,12 @@ def github_app_api(params: dict[str, Any], **_: Any) -> str:
         repo = _repo(params)
         body = params.get("json_body")
         json_body = body if isinstance(body, dict) else None
-        result = _auth().request(method, path, repo=repo, json_body=json_body)
+        auth = _auth()
+        result = (
+            auth.app_request(method, path, json_body=json_body)
+            if requires_app_jwt(path)
+            else auth.request(method, path, repo=repo, json_body=json_body)
+        )
         return result
 
     return _handle_errors(run)

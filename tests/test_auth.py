@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 
 import httpx
 
-from hermes_github_app_plugin.auth import GitHubAppAuth, InstallationToken, auth_metadata
+from hermes_github_app_plugin.auth import (
+    GitHubAppAuth,
+    InstallationToken,
+    auth_metadata,
+    requires_app_jwt,
+)
 from hermes_github_app_plugin.config import GitHubAppConfig
 
 PRIVATE_KEY = "[REDACTED PRIVATE KEY]\n"
@@ -84,3 +89,10 @@ def test_app_request_uses_app_jwt(monkeypatch) -> None:  # type: ignore[no-untyp
     assert seen[0].url.path == "/app"
     assert seen[0].headers["authorization"] == "Bearer jwt-token"
     assert result["auth"]["auth_mode"] == "github_app_jwt"
+
+
+def test_requires_app_jwt_detects_app_endpoints() -> None:
+    assert requires_app_jwt("/app")
+    assert requires_app_jwt("/app/installations")
+    assert requires_app_jwt("https://api.github.com/app")
+    assert not requires_app_jwt("/repos/OWNER/REPO")

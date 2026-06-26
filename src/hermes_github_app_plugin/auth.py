@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import jwt
@@ -190,3 +191,15 @@ def auth_metadata(token: InstallationToken, *, repo: str | None = None) -> dict[
         "token": token.redacted,
         "expires_at": token.expires_at.isoformat(),
     }
+
+
+def requires_app_jwt(path: str) -> bool:
+    """Return True for GitHub App endpoints that require app JWT auth."""
+    path_only = path.split("?", 1)[0]
+    if path_only.startswith("http"):
+        try:
+            path_only = urlparse(path_only).path
+        except ValueError:
+            return False
+    normalized = "/" + path_only.lstrip("/")
+    return normalized == "/app" or normalized.startswith("/app/")
