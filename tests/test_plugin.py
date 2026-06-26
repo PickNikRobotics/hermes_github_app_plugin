@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
@@ -33,3 +34,12 @@ def test_register_adds_tools_cli_and_skill() -> None:
     assert "github_app_create_pr" in ctx.tools
     assert ctx.cli_commands == ["hermes-github-app"]
     assert ctx.skills[0][0] == "github-app-workflow"
+
+
+def test_plugin_entry_point_loads_module_with_register() -> None:
+    matches = [ep for ep in entry_points(group="hermes_agent.plugins") if ep.name == "github-app"]
+
+    assert len(matches) == 1
+    loaded = matches[0].load()
+    assert loaded.__name__ == "hermes_github_app_plugin"
+    assert loaded.register is register

@@ -108,8 +108,8 @@ Before the first release, configure PyPI Trusted Publishing for this repository 
 Release example:
 
 ```bash
-git tag 0.1.0
-git push origin 0.1.0
+git tag 0.1.1
+git push origin 0.1.1
 ```
 
 Tags like `v0.1.0`, `0.1`, or `0.1.0rc1` will not publish.
