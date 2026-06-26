@@ -1,0 +1,27 @@
+name: github-app
+version: 0.1.0
+description: "GitHub App identity integration for Hermes: per-agent app token minting, GitHub API tools, gh/git wrappers, CLI, and workflow skill."
+author: Hermes GitHub App Plugin Contributors
+provides_tools:
+  - github_app_status
+  - github_app_verify_identity
+  - github_app_api
+  - github_app_graphql
+  - github_app_create_issue
+  - github_app_comment_issue
+  - github_app_create_pr
+  - github_app_comment_pr
+provides_cli:
+  - hermes-github-app
+  - gh-app
+  - git-app
+requires_env:
+  - name: GITHUB_APP_CLIENT_ID
+    description: "GitHub App client ID for this Hermes agent. Can also be set in ~/.hermes/config.yaml under github_app.client_id."
+    secret: false
+  - name: GITHUB_APP_INSTALLATION_ID
+    description: "GitHub App installation ID for this Hermes agent. Can also be set in ~/.hermes/config.yaml under github_app.installation_id."
+    secret: false
+  - name: GITHUB_APP_PRIVATE_KEY_PATH
+    description: "Path to the GitHub App private key PEM. Can also be set in ~/.hermes/config.yaml under github_app.private_key_path."
+    secret: true
