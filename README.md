@@ -88,6 +88,32 @@ To keep agents from falling back to local human credentials, update existing Git
 - Avoid `@me` assumptions because the GitHub App bot is not the human operator.
 - Require write summaries to include the returned `auth_mode`, `app_slug`, `installation_id`, repository, operation, and URL/path.
 
+## Releasing to PyPI
+
+The package is built with Hatchling and publishes through the `CD` GitHub Actions workflow using PyPI Trusted Publishing / OIDC. The workflow listens to all pushed tags but only builds and publishes when the tag matches:
+
+```text
+^[0-9]+\.[0-9]+\.[0-9]+$
+```
+
+The tag must also match `project.version` in `pyproject.toml`.
+
+Before the first release, configure PyPI Trusted Publishing for this repository and workflow:
+
+- PyPI project name: `hermes-github-app-plugin`
+- Owner/repository: this GitHub repository
+- Workflow name: `cd.yaml`
+- Environment name: `pypi`
+
+Release example:
+
+```bash
+git tag 0.1.0
+git push origin 0.1.0
+```
+
+Tags like `v0.1.0`, `0.1`, or `0.1.0rc1` will not publish.
+
 ## Hermes tools
 
 The plugin registers these tools:
