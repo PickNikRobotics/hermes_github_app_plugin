@@ -59,3 +59,28 @@ def test_request_includes_installation_token(monkeypatch) -> None:  # type: igno
     assert seen[0].headers["authorization"] == "Bearer jwt-token"
     assert seen[1].headers["authorization"] == "Bearer ghu_installation_token"
     assert json.loads(json.dumps(result))["auth"]["auth_mode"] == "github_app"
+
+
+def test_app_request_uses_app_jwt(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("jwt.encode", lambda *_, **__: "jwt-token")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"slug": "hermes-test-agent"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    config = GitHubAppConfig(
+        client_id="123",
+        installation_id="456",
+        private_key=PRIVATE_KEY,
+        private_key_source="env",
+        app_slug="hermes-test-agent",
+    )
+
+    result = GitHubAppAuth(config, client=client).app_request("GET", "/app")
+
+    assert result["result"] == {"slug": "hermes-test-agent"}
+    assert seen[0].url.path == "/app"
+    assert seen[0].headers["authorization"] == "Bearer jwt-token"
+    assert result["auth"]["auth_mode"] == "github_app_jwt"

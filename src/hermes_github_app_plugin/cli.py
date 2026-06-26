@@ -196,7 +196,7 @@ def _doctor(repo: str | None, *, skip_network: bool) -> int:
             auth = GitHubAppAuth(config)
             token = auth.get_installation_token(force_refresh=True)
             checks.append(("installation token minted", True, token.redacted))
-            app_result = auth.request("GET", "/app")["result"]
+            app_result = auth.app_request("GET", "/app")["result"]
             checks.append(("/app API reachable", True, str(app_result.get("slug", "ok"))))
             if repo:
                 repo_result = auth.request("GET", f"/repos/{repo}", repo=repo)["result"]
@@ -225,7 +225,7 @@ def _status(repo: str | None) -> int:
     config = load_config()
     auth = GitHubAppAuth(config)
     token = auth.get_installation_token(force_refresh=True)
-    app = auth.request("GET", "/app")["result"]
+    app = auth.app_request("GET", "/app")["result"]
     repo_probe = auth.request("GET", f"/repos/{repo}", repo=repo)["result"] if repo else None
     print(
         json.dumps(

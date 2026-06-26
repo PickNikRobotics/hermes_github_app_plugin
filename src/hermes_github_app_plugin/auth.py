@@ -84,6 +84,46 @@ class GitHubAppAuth:
         self._cached_token = token
         return token
 
+    def app_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Call a GitHub App endpoint using the app JWT.
+
+        Endpoints like `GET /app` authenticate as the GitHub App itself and
+        reject installation access tokens. Repository and user endpoints should
+        continue to use `request()`, which authenticates as the installation.
+        """
+        url = (
+            path if path.startswith("http") else f"{self._config.github_api_url}/{path.lstrip('/')}"
+        )
+        response = self._client.request(
+            method.upper(),
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.create_jwt()}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json=json_body,
+            params=params,
+        )
+        response.raise_for_status()
+        return {
+            "auth": {
+                "auth_mode": "github_app_jwt",
+                "client_id": self._config.client_id,
+                "app_slug": self._config.app_slug,
+                "installation_id": self._config.installation_id,
+            },
+            "status_code": response.status_code,
+            "result": response.json() if response.content else {"ok": True},
+        }
+
     def request(
         self,
         method: str,
