@@ -26,6 +26,7 @@ def test_setup_non_interactive_writes_config_and_skips_verify(
         github_app_command="setup",
         client_id="Iv1.exampleclientid",
         installation_id="987654",
+        installation_id_for=[],
         private_key_path=str(key_path),
         app_slug="hermes-test-agent",
         non_interactive=True,
@@ -65,6 +66,7 @@ def test_setup_prompts_mark_optional(
         github_app_command="setup",
         client_id=None,
         installation_id=None,
+        installation_id_for=[],
         private_key_path=None,
         app_slug=None,
         non_interactive=False,
@@ -158,3 +160,33 @@ def test_api_routes_repo_paths_to_installation_token(
 
     output = capsys.readouterr().out
     assert '"repo": "OWNER/REPO"' in output
+
+
+def test_setup_non_interactive_writes_owner_installation_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hermes_home = tmp_path / ".hermes"
+    key_path = tmp_path / "app.pem"
+    key_path.write_text(PRIVATE_KEY, encoding="utf-8")
+    key_path.chmod(0o600)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    args = argparse.Namespace(
+        github_app_command="setup",
+        client_id="Iv1.exampleclientid",
+        installation_id="987654",
+        installation_id_for=["ExampleOrg=111", "ExampleInfra=222"],
+        private_key_path=str(key_path),
+        app_slug="hermes-test-agent",
+        non_interactive=True,
+        repo=None,
+        skip_verify=True,
+    )
+
+    assert cli.main(args) == 0
+
+    data = yaml.safe_load((hermes_home / "config.yaml").read_text(encoding="utf-8"))
+    assert data["github_app"]["installation_ids"] == {
+        "exampleorg": "111",
+        "exampleinfra": "222",
+    }

@@ -11,6 +11,7 @@ from hermes_github_app_plugin.auth import (
     GitHubAppAuth,
     InstallationToken,
     auth_metadata,
+    repo_from_path,
     requires_app_jwt,
 )
 from hermes_github_app_plugin.config import GitHubAppConfig
@@ -52,6 +53,7 @@ def test_request_includes_installation_token(monkeypatch) -> None:  # type: igno
         client_id="123",
         installation_id="456",
         private_key=PRIVATE_KEY,
+        installation_ids={},
         private_key_source="env",
         app_slug="hermes-test-agent",
     )
@@ -79,6 +81,7 @@ def test_app_request_uses_app_jwt(monkeypatch) -> None:  # type: ignore[no-untyp
         client_id="123",
         installation_id="456",
         private_key=PRIVATE_KEY,
+        installation_ids={},
         private_key_source="env",
         app_slug="hermes-test-agent",
     )
@@ -96,3 +99,45 @@ def test_requires_app_jwt_detects_app_endpoints() -> None:
     assert requires_app_jwt("/app/installations")
     assert requires_app_jwt("https://api.github.com/app")
     assert not requires_app_jwt("/repos/OWNER/REPO")
+
+
+def test_request_chooses_installation_id_for_repo_owner(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("jwt.encode", lambda *_, **__: "jwt-token")
+    token_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/access_tokens"):
+            token_paths.append(request.url.path)
+            installation_id = request.url.path.split("/")[-2]
+            return httpx.Response(
+                201,
+                json={
+                    "token": f"ghu_token_{installation_id}",
+                    "expires_at": "2030-01-01T00:00:00Z",
+                },
+            )
+        return httpx.Response(200, json={"full_name": "ExampleInfra/automation-config"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    config = GitHubAppConfig(
+        client_id="123",
+        installation_id="456",
+        private_key=PRIVATE_KEY,
+        installation_ids={"exampleinfra": "789"},
+        private_key_source="env",
+        app_slug="hermes-test-agent",
+    )
+
+    result = GitHubAppAuth(config, client=client).request(
+        "GET", "/repos/ExampleInfra/automation-config"
+    )
+
+    assert token_paths == ["/app/installations/789/access_tokens"]
+    assert result["auth"]["installation_id"] == "789"
+    assert result["auth"]["repository"] == "ExampleInfra/automation-config"
+
+
+def test_repo_from_path_infers_rest_repo_paths() -> None:
+    assert repo_from_path("/repos/OWNER/REPO/issues") == "OWNER/REPO"
+    assert repo_from_path("https://api.github.com/repos/OWNER/REPO") == "OWNER/REPO"
+    assert repo_from_path("/installation/repositories") is None

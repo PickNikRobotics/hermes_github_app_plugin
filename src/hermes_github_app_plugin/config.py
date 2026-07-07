@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,9 +23,19 @@ class GitHubAppConfig:
     client_id: str
     installation_id: str
     private_key: str
+    installation_ids: dict[str, str]
     private_key_source: str
     app_slug: str | None = None
     github_api_url: str = "https://api.github.com"
+
+    def installation_id_for_repo(self, repo: str | None = None) -> str:
+        """Return the installation ID for an optional OWNER/REPO target."""
+        if repo and "/" in repo:
+            owner = repo.split("/", 1)[0].lower()
+            installation_id = self.installation_ids.get(owner)
+            if installation_id:
+                return installation_id
+        return self.installation_id
 
 
 def hermes_home() -> Path:
@@ -63,7 +74,7 @@ def write_github_app_config(values: Mapping[str, Any]) -> Path:
         section = {}
         data["github_app"] = section
     for key, value in values.items():
-        if value in (None, "", (), []):
+        if value in (None, "", (), []) or (isinstance(value, Mapping) and not value):
             section.pop(key, None)
         else:
             section[key] = value
@@ -74,6 +85,37 @@ def write_github_app_config(values: Mapping[str, Any]) -> Path:
         yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8"
     )
     return path
+
+
+def _parse_installation_ids(raw: Any) -> dict[str, str]:
+    """Parse owner-to-installation-ID mapping from YAML or environment values."""
+    if raw in (None, ""):
+        return {}
+    parsed: Any = raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = {}
+            for item in raw.replace("\n", ",").split(","):
+                if not item.strip():
+                    continue
+                if "=" not in item:
+                    raise ConfigurationError(
+                        "invalid GITHUB_APP_INSTALLATION_IDS entry: "
+                        f"{item!r}; expected OWNER=INSTALLATION_ID"
+                    ) from None
+                owner, installation_id = item.split("=", 1)
+                parsed[owner.strip()] = installation_id.strip()
+    if not isinstance(parsed, Mapping):
+        raise ConfigurationError("github_app.installation_ids must be a mapping of owner to ID")
+    result: dict[str, str] = {}
+    for owner, installation_id in parsed.items():
+        owner_text = str(owner).strip().lower()
+        installation_text = str(installation_id).strip()
+        if owner_text and installation_text:
+            result[owner_text] = installation_text
+    return result
 
 
 def _read_private_key(section: Mapping[str, Any]) -> tuple[str, str]:
@@ -106,16 +148,23 @@ def load_config() -> GitHubAppConfig:
         raise ConfigurationError(
             "missing GitHub App client ID: set GITHUB_APP_CLIENT_ID or github_app.client_id"
         )
-    if not installation_id:
+    installation_ids = _parse_installation_ids(
+        os.environ.get("GITHUB_APP_INSTALLATION_IDS") or section.get("installation_ids", {})
+    )
+    if not installation_id and not installation_ids:
         raise ConfigurationError(
-            "missing GitHub App installation ID: set GITHUB_APP_INSTALLATION_ID "
-            "or github_app.installation_id"
+            "missing GitHub App installation ID: set GITHUB_APP_INSTALLATION_ID, "
+            "github_app.installation_id, or github_app.installation_ids"
         )
+    if not installation_id:
+        # Use a deterministic fallback for commands that cannot infer an OWNER/REPO.
+        installation_id = next(iter(installation_ids.values()))
     private_key, private_key_source = _read_private_key(section)
     return GitHubAppConfig(
         client_id=client_id,
         installation_id=installation_id,
         private_key=private_key,
+        installation_ids=installation_ids,
         private_key_source=private_key_source,
         app_slug=os.environ.get("GITHUB_APP_SLUG") or section.get("app_slug"),
         github_api_url=os.environ.get("GITHUB_API_URL")

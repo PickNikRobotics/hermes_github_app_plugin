@@ -39,6 +39,7 @@ def github_app_status(params: dict[str, Any], **_: Any) -> str:
             "configured": True,
             "client_id": config.client_id,
             "installation_id": config.installation_id,
+            "installation_ids": dict(config.installation_ids),
             "app_slug": config.app_slug,
             "private_key_source": config.private_key_source,
             "github_api_url": config.github_api_url,
@@ -54,7 +55,7 @@ def github_app_verify_identity(params: dict[str, Any], **_: Any) -> str:
     def run() -> dict[str, Any]:
         repo = _repo(params)
         auth = _auth()
-        token = auth.get_installation_token(force_refresh=True)
+        token = auth.get_installation_token(repo=repo, force_refresh=True)
         app = auth.app_request("GET", "/app")
         repo_probe = auth.request("GET", f"/repos/{repo}", repo=repo) if repo else None
         return {
@@ -92,7 +93,9 @@ def github_app_graphql(params: dict[str, Any], **_: Any) -> str:
     def run() -> dict[str, Any]:
         variables = params.get("variables")
         return _auth().graphql(
-            str(params["query"]), variables if isinstance(variables, dict) else None
+            str(params["query"]),
+            variables if isinstance(variables, dict) else None,
+            repo=_repo(params),
         )
 
     return _handle_errors(run)

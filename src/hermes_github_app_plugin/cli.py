@@ -29,7 +29,14 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
         "--non-interactive", action="store_true", help="Read values from flags/env only"
     )
     setup.add_argument("--client-id", help="GitHub App client ID")
-    setup.add_argument("--installation-id", help="GitHub App installation ID")
+    setup.add_argument("--installation-id", help="Default GitHub App installation ID")
+    setup.add_argument(
+        "--installation-id-for",
+        action="append",
+        default=[],
+        metavar="OWNER=ID",
+        help="Owner-specific installation ID mapping; repeat for multiple orgs",
+    )
     setup.add_argument("--private-key-path", help="Path to GitHub App private key PEM")
     setup.add_argument("--app-slug", help="Optional GitHub App slug, e.g. my-agent")
     setup.add_argument(
@@ -87,9 +94,9 @@ def gh_app_main() -> NoReturn:
         print("usage: gh-app [--repo OWNER/REPO] [--] <gh args...>")
         print("Runs gh with GH_TOKEN/GITHUB_TOKEN set to a GitHub App installation token.")
         raise SystemExit(0)
-    _, child_args = _extract_repo(args)
+    repo, child_args = _extract_repo(args)
     config = load_config()
-    token = GitHubAppAuth(config).get_installation_token()
+    token = GitHubAppAuth(config).get_installation_token(repo=repo)
     env = os.environ.copy()
     env["GH_TOKEN"] = token.token
     env["GITHUB_TOKEN"] = token.token
@@ -102,9 +109,9 @@ def git_app_main() -> NoReturn:
         print("usage: git-app [--repo OWNER/REPO] [--] <git args...>")
         print("Runs git with a temporary askpass helper backed by a GitHub App token.")
         raise SystemExit(0)
-    _, child_args = _extract_repo(sys.argv[1:])
+    repo, child_args = _extract_repo(sys.argv[1:])
     config = load_config()
-    token = GitHubAppAuth(config).get_installation_token()
+    token = GitHubAppAuth(config).get_installation_token(repo=repo)
     with tempfile.TemporaryDirectory(prefix="git-app-") as temp_dir:
         askpass = Path(temp_dir) / "askpass.sh"
         askpass.write_text(
@@ -127,6 +134,7 @@ def _setup(args: argparse.Namespace) -> int:
     """Interactively write GitHub App configuration."""
     print("Hermes GitHub App setup")
     print("Required values are unmarked. Optional prompts include '(optional)'.")
+    installation_ids = _parse_installation_id_for_args(list(args.installation_id_for))
     values = {
         "client_id": _value_or_prompt(
             args.client_id,
@@ -139,9 +147,10 @@ def _setup(args: argparse.Namespace) -> int:
             args.installation_id,
             "GitHub App installation ID",
             env="GITHUB_APP_INSTALLATION_ID",
-            required=True,
+            required=not installation_ids,
             non_interactive=bool(args.non_interactive),
         ),
+        "installation_ids": installation_ids,
         "private_key_path": _value_or_prompt(
             args.private_key_path,
             "GitHub App private key path",
@@ -194,7 +203,7 @@ def _doctor(repo: str | None, *, skip_network: bool) -> int:
             )
         if not skip_network:
             auth = GitHubAppAuth(config)
-            token = auth.get_installation_token(force_refresh=True)
+            token = auth.get_installation_token(repo=repo, force_refresh=True)
             checks.append(("installation token minted", True, token.redacted))
             app_result = auth.app_request("GET", "/app")["result"]
             checks.append(("/app API reachable", True, str(app_result.get("slug", "ok"))))
@@ -224,7 +233,7 @@ def _doctor(repo: str | None, *, skip_network: bool) -> int:
 def _status(repo: str | None) -> int:
     config = load_config()
     auth = GitHubAppAuth(config)
-    token = auth.get_installation_token(force_refresh=True)
+    token = auth.get_installation_token(repo=repo, force_refresh=True)
     app = auth.app_request("GET", "/app")["result"]
     repo_probe = auth.request("GET", f"/repos/{repo}", repo=repo)["result"] if repo else None
     print(
@@ -244,7 +253,7 @@ def _status(repo: str | None) -> int:
 
 def _token(repo: str | None, *, json_output: bool) -> int:
     config = load_config()
-    token = GitHubAppAuth(config).get_installation_token()
+    token = GitHubAppAuth(config).get_installation_token(repo=repo)
     if json_output:
         print(json.dumps({"token": token.token, "auth": auth_metadata(token, repo=repo)}, indent=2))
     else:
@@ -260,6 +269,25 @@ def _api(method: str, path: str, *, repo: str | None, body: dict[str, Any] | Non
         result = auth.request(method, path, repo=repo, json_body=body)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _parse_installation_id_for_args(values: list[str]) -> dict[str, str]:
+    """Parse repeated OWNER=INSTALLATION_ID setup flags."""
+    installation_ids: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise ConfigurationError(
+                f"invalid --installation-id-for value: {value!r}; expected OWNER=INSTALLATION_ID"
+            )
+        owner, installation_id = value.split("=", 1)
+        owner = owner.strip().lower()
+        installation_id = installation_id.strip()
+        if not owner or not installation_id:
+            raise ConfigurationError(
+                f"invalid --installation-id-for value: {value!r}; expected OWNER=INSTALLATION_ID"
+            )
+        installation_ids[owner] = installation_id
+    return installation_ids
 
 
 def _value_or_prompt(

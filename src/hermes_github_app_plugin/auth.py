@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -40,7 +41,7 @@ class GitHubAppAuth:
     def __init__(self, config: GitHubAppConfig, client: httpx.Client | None = None) -> None:
         self._config = config
         self._client = client or httpx.Client(timeout=20)
-        self._cached_token: InstallationToken | None = None
+        self._cached_tokens: dict[str, InstallationToken] = {}
 
     @property
     def config(self) -> GitHubAppConfig:
@@ -53,18 +54,21 @@ class GitHubAppAuth:
         encoded = jwt.encode(payload, self._config.private_key, algorithm="RS256")
         return str(encoded)
 
-    def get_installation_token(self, *, force_refresh: bool = False) -> InstallationToken:
+    def get_installation_token(
+        self, *, repo: str | None = None, force_refresh: bool = False
+    ) -> InstallationToken:
         """Return a valid installation token, refreshing when near expiry."""
+        installation_id = self._config.installation_id_for_repo(repo)
+        cached_token = self._cached_tokens.get(installation_id)
         if (
             not force_refresh
-            and self._cached_token is not None
-            and self._cached_token.expires_at > datetime.now(timezone.utc) + timedelta(minutes=5)
+            and cached_token is not None
+            and cached_token.expires_at > datetime.now(timezone.utc) + timedelta(minutes=5)
         ):
-            return self._cached_token
+            return cached_token
 
         response = self._client.post(
-            f"{self._config.github_api_url}/app/installations/"
-            f"{self._config.installation_id}/access_tokens",
+            f"{self._config.github_api_url}/app/installations/{installation_id}/access_tokens",
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {self.create_jwt()}",
@@ -78,11 +82,11 @@ class GitHubAppAuth:
         token = InstallationToken(
             token=str(data["token"]),
             expires_at=expires_at,
-            installation_id=self._config.installation_id,
+            installation_id=installation_id,
             client_id=self._config.client_id,
             app_slug=self._config.app_slug,
         )
-        self._cached_token = token
+        self._cached_tokens[installation_id] = token
         return token
 
     def app_request(
@@ -120,6 +124,7 @@ class GitHubAppAuth:
                 "client_id": self._config.client_id,
                 "app_slug": self._config.app_slug,
                 "installation_id": self._config.installation_id,
+                "installation_ids": dict(self._config.installation_ids),
             },
             "status_code": response.status_code,
             "result": response.json() if response.content else {"ok": True},
@@ -135,7 +140,8 @@ class GitHubAppAuth:
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Call the GitHub REST API using the installation token."""
-        token = self.get_installation_token()
+        repo = repo or repo_from_path(path)
+        token = self.get_installation_token(repo=repo)
         url = (
             path if path.startswith("http") else f"{self._config.github_api_url}/{path.lstrip('/')}"
         )
@@ -158,9 +164,11 @@ class GitHubAppAuth:
             "result": parsed,
         }
 
-    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    def graphql(
+        self, query: str, variables: dict[str, Any] | None = None, *, repo: str | None = None
+    ) -> dict[str, Any]:
         """Call GitHub GraphQL API using the installation token."""
-        token = self.get_installation_token()
+        token = self.get_installation_token(repo=repo)
         response = self._client.post(
             f"{self._config.github_api_url}/graphql",
             headers={
@@ -172,7 +180,7 @@ class GitHubAppAuth:
         )
         response.raise_for_status()
         return {
-            "auth": auth_metadata(token),
+            "auth": auth_metadata(token, repo=repo),
             "status_code": response.status_code,
             "result": response.json(),
         }
@@ -203,3 +211,17 @@ def requires_app_jwt(path: str) -> bool:
             return False
     normalized = "/" + path_only.lstrip("/")
     return normalized == "/app" or normalized.startswith("/app/")
+
+
+def repo_from_path(path: str) -> str | None:
+    """Infer OWNER/REPO from common REST API repository paths."""
+    path_only = path.split("?", 1)[0]
+    if path_only.startswith("http"):
+        try:
+            path_only = urlparse(path_only).path
+        except ValueError:
+            return None
+    match = re.match(r"^/?repos/([^/]+)/([^/]+)(?:/|$)", path_only)
+    if not match:
+        return None
+    return f"{match.group(1)}/{match.group(2)}"

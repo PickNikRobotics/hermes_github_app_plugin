@@ -20,7 +20,10 @@ requires_env:
     description: "GitHub App client ID for this Hermes agent. Can also be set in ~/.hermes/config.yaml under github_app.client_id."
     secret: false
   - name: GITHUB_APP_INSTALLATION_ID
-    description: "GitHub App installation ID for this Hermes agent. Can also be set in ~/.hermes/config.yaml under github_app.installation_id."
+    description: "Default GitHub App installation ID for this Hermes agent. Can also be set in ~/.hermes/config.yaml under github_app.installation_id."
+    secret: false
+  - name: GITHUB_APP_INSTALLATION_IDS
+    description: "Optional owner-to-installation-ID mapping for apps installed in multiple orgs. JSON object or OWNER=ID,OWNER2=ID2. Can also be set under github_app.installation_ids."
     secret: false
   - name: GITHUB_APP_PRIVATE_KEY_PATH
     description: "Path to the GitHub App private key PEM. Can also be set in ~/.hermes/config.yaml under github_app.private_key_path."

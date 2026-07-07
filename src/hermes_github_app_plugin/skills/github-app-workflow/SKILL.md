@@ -11,7 +11,17 @@ Use this skill for GitHub operations from Hermes agents that are configured with
 
 ## First-time setup
 
-Run `hermes-github-app setup` to write `github_app` config into `~/.hermes/config.yaml`. The setup walkthrough marks optional values with `(optional)`; the required values are GitHub App client ID, installation ID, and private key path.
+Run `hermes-github-app setup` to write `github_app` config into `~/.hermes/config.yaml`. The setup walkthrough marks optional values with `(optional)`; the required values are GitHub App client ID, a default installation ID or owner-specific `installation_ids`, and private key path. For apps installed in multiple organizations, pass repeated `--installation-id-for OWNER=ID` flags or configure:
+
+```yaml
+github_app:
+  installation_id: "123456"  # default/fallback
+  installation_ids:
+    ExampleOrg: "123456"
+    ExampleInfra: "789012"
+```
+
+The plugin chooses an owner-specific installation ID from `--repo OWNER/REPO` or `/repos/OWNER/REPO` REST API paths and falls back to `installation_id` when no repository owner is available.
 
 After setup, run `hermes-github-app doctor --repo OWNER/REPO` to verify console scripts, config loading, private-key permissions, token minting, and repository access. Use `--skip-network` only for container/image builds where secrets or network access are not available yet.
 

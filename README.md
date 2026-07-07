@@ -7,7 +7,12 @@ Each Hermes agent runs the same package but is configured with its own GitHub Ap
 ```yaml
 github_app:
   client_id: "Iv1.exampleclientid"
+  # Optional default used when a command cannot infer OWNER/REPO.
   installation_id: "987654"
+  # Optional owner-specific installation IDs for apps installed in multiple orgs.
+  installation_ids:
+    ExampleOrg: "123456"
+    ExampleInfra: "987654"
   private_key_path: "~/.hermes/secrets/agent-github-app.private-key.pem"
   app_slug: "hermes-agent"
 ```
@@ -16,6 +21,7 @@ Environment variables with the same meaning are also supported:
 
 - `GITHUB_APP_CLIENT_ID`
 - `GITHUB_APP_INSTALLATION_ID`
+- `GITHUB_APP_INSTALLATION_IDS` (JSON object or `OWNER=ID,OWNER2=ID2` mapping)
 - `GITHUB_APP_PRIVATE_KEY_PATH`
 - `GITHUB_APP_PRIVATE_KEY` (PEM contents; useful for CI)
 
@@ -27,7 +33,7 @@ Repository access is controlled by the GitHub App installation scope in GitHub. 
 
 `installation_id` identifies one installation of that app on a specific user or organization account. It is required when exchanging the app JWT for an installation access token via `POST /app/installations/{installation_id}/access_tokens`.
 
-In other words: `client_id` answers "which GitHub App is signing this JWT?" while `installation_id` answers "which installed copy of that app should this token act as?" The same GitHub App can have multiple installation IDs if it is installed on multiple accounts.
+In other words: `client_id` answers "which GitHub App is signing this JWT?" while `installation_id` answers "which installed copy of that app should this token act as?" The same GitHub App can have multiple installation IDs if it is installed on multiple accounts. Configure `installation_ids` when one app is installed in multiple organizations; the plugin chooses an owner-specific ID from `--repo OWNER/REPO` or `/repos/OWNER/REPO` REST paths and falls back to `installation_id` when no repository owner is available.
 
 ## Install
 
@@ -53,6 +59,8 @@ For scripted installs, pass flags and skip the network verification until secret
 hermes-github-app setup --non-interactive --skip-verify \
   --client-id Iv1.exampleclientid \
   --installation-id 987654 \
+  --installation-id-for ExampleOrg=123456 \
+  --installation-id-for ExampleInfra=987654 \
   --private-key-path ~/.hermes/secrets/agent-github-app.private-key.pem \
   --app-slug hermes-agent
 ```
