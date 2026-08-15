@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -39,8 +40,19 @@ class GitHubAppConfig:
 
 
 def hermes_home() -> Path:
-    """Return the configured Hermes home directory."""
-    return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+    """Return the configured Hermes home directory.
+
+    Prefer ``hermes_constants.get_hermes_home()`` so the profile-scoped home
+    (the contextvar override installed by a multiplex gateway) is honored when
+    this code runs inside a Hermes process. Falls back to the ``HERMES_HOME``
+    env var / platform default when the module is unavailable (e.g. the
+    standalone CLI, launched outside the Hermes source tree).
+    """
+    try:
+        module = importlib.import_module("hermes_constants")
+        return cast(Path, cast(Any, module).get_hermes_home())
+    except (ImportError, AttributeError):
+        return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 
 
 def config_path() -> Path:
