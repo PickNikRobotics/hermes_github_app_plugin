@@ -12,9 +12,10 @@ from urllib.parse import urlparse
 import httpx
 import jwt
 
-from .config import GitHubAppConfig
+from .config import NONO_PHANTOM_TOKEN, GitHubAppConfig
 
 _MIN_REDACT_LENGTH = 8
+_BROKERED_TOKEN_LIFETIME = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class InstallationToken:
     installation_id: str
     client_id: str
     app_slug: str | None
+    token_broker: str | None = None
 
     @property
     def redacted(self) -> str:
@@ -48,7 +50,13 @@ class GitHubAppAuth:
         return self._config
 
     def create_jwt(self) -> str:
-        """Create a GitHub App JWT for installation-token exchange."""
+        """Create a GitHub App JWT for installation-token exchange.
+
+        In token broker mode there is no key to sign with; the placeholder is sent and the
+        broker replaces it outside the sandbox.
+        """
+        if self._config.token_broker:
+            return NONO_PHANTOM_TOKEN
         now = int(time.time())
         payload = {"iat": now - 60, "exp": now + 9 * 60, "iss": self._config.client_id}
         encoded = jwt.encode(payload, self._config.private_key, algorithm="RS256")
@@ -67,6 +75,26 @@ class GitHubAppAuth:
         ):
             return cached_token
 
+        if self._config.token_broker:
+            token = self._brokered_token(installation_id)
+        else:
+            token = self._exchange_app_jwt(installation_id)
+        self._cached_tokens[installation_id] = token
+        return token
+
+    def _brokered_token(self, installation_id: str) -> InstallationToken:
+        """Return the placeholder token with no network call; the broker injects the real one."""
+        return InstallationToken(
+            token=NONO_PHANTOM_TOKEN,
+            expires_at=datetime.now(timezone.utc) + _BROKERED_TOKEN_LIFETIME,
+            installation_id=installation_id,
+            client_id=self._config.client_id,
+            app_slug=self._config.app_slug,
+            token_broker=self._config.token_broker,
+        )
+
+    def _exchange_app_jwt(self, installation_id: str) -> InstallationToken:
+        """Exchange the app JWT for an installation access token."""
         response = self._client.post(
             f"{self._config.github_api_url}/app/installations/{installation_id}/access_tokens",
             headers={
@@ -79,15 +107,13 @@ class GitHubAppAuth:
         data = response.json()
         expires_at_raw = str(data["expires_at"])
         expires_at = datetime.fromisoformat(expires_at_raw.replace("Z", "+00:00"))
-        token = InstallationToken(
+        return InstallationToken(
             token=str(data["token"]),
             expires_at=expires_at,
             installation_id=installation_id,
             client_id=self._config.client_id,
             app_slug=self._config.app_slug,
         )
-        self._cached_tokens[installation_id] = token
-        return token
 
     def app_request(
         self,
@@ -125,6 +151,7 @@ class GitHubAppAuth:
                 "app_slug": self._config.app_slug,
                 "installation_id": self._config.installation_id,
                 "installation_ids": dict(self._config.installation_ids),
+                "token_broker": self._config.token_broker,
             },
             "status_code": response.status_code,
             "result": response.json() if response.content else {"ok": True},
@@ -197,6 +224,7 @@ def auth_metadata(token: InstallationToken, *, repo: str | None = None) -> dict[
         "actor_expected": actor,
         "repository": repo,
         "token": token.redacted,
+        "token_broker": token.token_broker,
         "expires_at": token.expires_at.isoformat(),
     }
 

@@ -16,7 +16,13 @@ from typing import Any, NoReturn
 import httpx
 
 from .auth import GitHubAppAuth, auth_metadata, requires_app_jwt
-from .config import ConfigurationError, load_config, write_github_app_config
+from .config import (
+    ConfigurationError,
+    GitHubAppConfig,
+    load_config,
+    parse_token_broker,
+    write_github_app_config,
+)
 
 
 def register_cli(parser: argparse.ArgumentParser) -> None:
@@ -38,6 +44,12 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
         help="Owner-specific installation ID mapping; repeat for multiple orgs",
     )
     setup.add_argument("--private-key-path", help="Path to GitHub App private key PEM")
+    setup.add_argument(
+        "--token-broker",
+        metavar="NAME",
+        help="Credentials are injected outside the sandbox by this broker (supported: nono); "
+        "no private key is configured",
+    )
     setup.add_argument("--app-slug", help="Optional GitHub App slug, e.g. my-agent")
     setup.add_argument(
         "--skip-verify", action="store_true", help="Write config without minting a token"
@@ -134,6 +146,15 @@ def _setup(args: argparse.Namespace) -> int:
     """Interactively write GitHub App configuration."""
     print("Hermes GitHub App setup")
     print("Required values are unmarked. Optional prompts include '(optional)'.")
+    token_broker = parse_token_broker(
+        getattr(args, "token_broker", None) or os.environ.get("GITHUB_APP_TOKEN_BROKER"),
+        source="--token-broker or GITHUB_APP_TOKEN_BROKER",
+    )
+    if token_broker and args.private_key_path:
+        raise ConfigurationError(
+            "--private-key-path cannot be combined with --token-broker; "
+            "the private key must stay outside the agent's sandbox"
+        )
     installation_ids = _parse_installation_id_for_args(list(args.installation_id_for))
     values = {
         "client_id": _value_or_prompt(
@@ -151,7 +172,11 @@ def _setup(args: argparse.Namespace) -> int:
             non_interactive=bool(args.non_interactive),
         ),
         "installation_ids": installation_ids,
-        "private_key_path": _value_or_prompt(
+        "token_broker": token_broker,
+        # An empty value removes any private_key_path left by an earlier non-brokered setup.
+        "private_key_path": ""
+        if token_broker
+        else _value_or_prompt(
             args.private_key_path,
             "GitHub App private key path",
             env="GITHUB_APP_PRIVATE_KEY_PATH",
@@ -166,10 +191,11 @@ def _setup(args: argparse.Namespace) -> int:
             non_interactive=bool(args.non_interactive),
         ),
     }
-    key_path = Path(str(values["private_key_path"])).expanduser()
-    if not key_path.exists():
-        raise ConfigurationError(f"private key file does not exist: {key_path}")
-    _warn_private_key_permissions(key_path)
+    if not token_broker:
+        key_path = Path(str(values["private_key_path"])).expanduser()
+        if not key_path.exists():
+            raise ConfigurationError(f"private key file does not exist: {key_path}")
+        _warn_private_key_permissions(key_path)
     written = write_github_app_config(values)
     print(f"Wrote GitHub App config to {written}")
     if args.skip_verify:
@@ -189,22 +215,19 @@ def _doctor(repo: str | None, *, skip_network: bool) -> int:
     try:
         config = load_config()
         checks.append(("GitHub App config loaded", True, "client_id and installation_id present"))
-        key_source = Path(config.private_key_source).expanduser()
-        if config.private_key_source == "GITHUB_APP_PRIVATE_KEY":
-            checks.append(("private key loaded", True, "inline environment variable"))
+        if config.token_broker:
+            checks.extend(_token_broker_checks(config.token_broker))
         else:
-            checks.append(("private key file exists", key_source.exists(), str(key_source)))
-            checks.append(
-                (
-                    "private key file permissions",
-                    _private_key_permissions_ok(key_source),
-                    _mode(key_source),
-                )
-            )
+            checks.extend(_private_key_checks(config))
         if not skip_network:
             auth = GitHubAppAuth(config)
             token = auth.get_installation_token(repo=repo, force_refresh=True)
-            checks.append(("installation token minted", True, token.redacted))
+            minted_label = (
+                f"installation token brokered by {config.token_broker}"
+                if config.token_broker
+                else "installation token minted"
+            )
+            checks.append((minted_label, True, token.redacted))
             app_result = auth.app_request("GET", "/app")["result"]
             checks.append(("/app API reachable", True, str(app_result.get("slug", "ok"))))
             if repo:
@@ -228,6 +251,35 @@ def _doctor(repo: str | None, *, skip_network: bool) -> int:
         return 0
     print("Doctor found issues. Fix the failed checks above and rerun.", file=sys.stderr)
     return 1
+
+
+def _private_key_checks(config: GitHubAppConfig) -> list[tuple[str, bool, str]]:
+    if config.private_key_source == "GITHUB_APP_PRIVATE_KEY":
+        return [("private key loaded", True, "inline environment variable")]
+    key_source = Path(config.private_key_source).expanduser()
+    return [
+        ("private key file exists", key_source.exists(), str(key_source)),
+        (
+            "private key file permissions",
+            _private_key_permissions_ok(key_source),
+            _mode(key_source),
+        ),
+    ]
+
+
+def _token_broker_checks(broker: str) -> list[tuple[str, bool, str]]:
+    proxy_set = bool(os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"))
+    return [
+        ("token broker", True, f"{broker}; credentials are injected outside the sandbox"),
+        (
+            "HTTPS_PROXY set",
+            proxy_set,
+            "set"
+            if proxy_set
+            else "not set; agent does not appear to be running inside nono, "
+            "so no credentials will be injected",
+        ),
+    ]
 
 
 def _status(repo: str | None) -> int:
@@ -258,6 +310,12 @@ def _token(repo: str | None, *, json_output: bool) -> int:
         print(json.dumps({"token": token.token, "auth": auth_metadata(token, repo=repo)}, indent=2))
     else:
         print(token.token)
+    if config.token_broker:
+        print(
+            "note: token broker mode. The printed value is a placeholder; the real installation "
+            "token lives outside the sandbox and the nono proxy injects it into GitHub requests.",
+            file=sys.stderr,
+        )
     return 0
 
 

@@ -1,5 +1,5 @@
 name: github-app
-version: 0.1.0
+version: 0.3.0
 description: "GitHub App identity integration for Hermes: per-agent app token minting, GitHub API tools, gh/git wrappers, CLI, and workflow skill."
 author: Hermes GitHub App Plugin Contributors
 provides_tools:
@@ -26,5 +26,8 @@ requires_env:
     description: "Optional owner-to-installation-ID mapping for apps installed in multiple orgs. JSON object or OWNER=ID,OWNER2=ID2. Can also be set under github_app.installation_ids."
     secret: false
   - name: GITHUB_APP_PRIVATE_KEY_PATH
-    description: "Path to the GitHub App private key PEM. Can also be set in ~/.hermes/config.yaml under github_app.private_key_path."
+    description: "Path to the GitHub App private key PEM. Can also be set in ~/.hermes/config.yaml under github_app.private_key_path. Not used when GITHUB_APP_TOKEN_BROKER is set."
     secret: true
+  - name: GITHUB_APP_TOKEN_BROKER
+    description: "Set to nono when the agent runs in the nono sandbox and the token broker injects credentials. No private key is read in this mode. Can also be set in ~/.hermes/config.yaml under github_app.token_broker."
+    secret: false

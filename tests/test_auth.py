@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
+import pytest
 
 from hermes_github_app_plugin.auth import (
     GitHubAppAuth,
@@ -14,7 +15,7 @@ from hermes_github_app_plugin.auth import (
     repo_from_path,
     requires_app_jwt,
 )
-from hermes_github_app_plugin.config import GitHubAppConfig
+from hermes_github_app_plugin.config import NONO_PHANTOM_TOKEN, GitHubAppConfig
 
 PRIVATE_KEY = "[REDACTED PRIVATE KEY]\n"
 
@@ -141,3 +142,94 @@ def test_repo_from_path_infers_rest_repo_paths() -> None:
     assert repo_from_path("/repos/OWNER/REPO/issues") == "OWNER/REPO"
     assert repo_from_path("https://api.github.com/repos/OWNER/REPO") == "OWNER/REPO"
     assert repo_from_path("/installation/repositories") is None
+
+
+def _broker_config() -> GitHubAppConfig:
+    return GitHubAppConfig(
+        client_id="123",
+        installation_id="456",
+        private_key="",
+        installation_ids={"exampleinfra": "789"},
+        private_key_source="token broker: nono",
+        app_slug="hermes-test-agent",
+        token_broker="nono",
+    )
+
+
+def _fail_on_network(request: httpx.Request) -> httpx.Response:
+    raise AssertionError(f"unexpected network call in token broker mode: {request.url}")
+
+
+def test_broker_installation_token_makes_no_network_call() -> None:
+    client = httpx.Client(transport=httpx.MockTransport(_fail_on_network))
+    auth = GitHubAppAuth(_broker_config(), client=client)
+    before = datetime.now(timezone.utc)
+
+    token = auth.get_installation_token(repo="ExampleInfra/automation-config")
+
+    assert token.token == NONO_PHANTOM_TOKEN
+    assert token.installation_id == "789"
+    assert token.app_slug == "hermes-test-agent"
+    assert token.client_id == "123"
+    assert token.token_broker == "nono"
+    assert timedelta(hours=1) <= token.expires_at - before < timedelta(hours=1, minutes=1)
+    # The brokered token is cached like a minted one, so repeat calls stay offline too.
+    assert auth.get_installation_token(repo="ExampleInfra/automation-config") is token
+
+
+def test_broker_create_jwt_returns_placeholder_without_signing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_signing(*_: object, **__: object) -> str:
+        raise AssertionError("token broker mode must not sign with a private key")
+
+    monkeypatch.setattr("jwt.encode", fail_if_signing)
+    client = httpx.Client(transport=httpx.MockTransport(_fail_on_network))
+
+    assert GitHubAppAuth(_broker_config(), client=client).create_jwt() == NONO_PHANTOM_TOKEN
+
+
+def test_broker_request_sends_placeholder_and_reports_broker() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"full_name": "ExampleInfra/automation-config"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = GitHubAppAuth(_broker_config(), client=client).request(
+        "GET", "/repos/ExampleInfra/automation-config"
+    )
+
+    assert len(seen) == 1
+    assert seen[0].url.path == "/repos/ExampleInfra/automation-config"
+    assert seen[0].headers["authorization"] == "Bearer nono-phantom-github-app"
+    assert result["auth"]["installation_id"] == "789"
+    assert result["auth"]["token_broker"] == "nono"
+    assert result["auth"]["token"] == "nono…-app"
+
+
+def test_broker_app_request_sends_placeholder() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"slug": "hermes-test-agent"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = GitHubAppAuth(_broker_config(), client=client).app_request("GET", "/app")
+
+    assert seen[0].headers["authorization"] == "Bearer nono-phantom-github-app"
+    assert result["auth"]["token_broker"] == "nono"
+
+
+def test_auth_metadata_without_broker_reports_null_token_broker() -> None:
+    token = InstallationToken(
+        token="ghu_ab...wxyz",
+        expires_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+        installation_id="456",
+        client_id="123",
+        app_slug=None,
+    )
+
+    assert auth_metadata(token)["token_broker"] is None
