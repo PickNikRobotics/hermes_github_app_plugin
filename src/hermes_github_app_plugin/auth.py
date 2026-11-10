@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import httpx
 import jwt
 
-from .config import NONO_PHANTOM_TOKEN, GitHubAppConfig
+from .config import NONO_PLACEHOLDER, GitHubAppConfig
 
 _MIN_REDACT_LENGTH = 8
 _BROKERED_TOKEN_LIFETIME = timedelta(hours=1)
@@ -56,7 +56,7 @@ class GitHubAppAuth:
         broker replaces it outside the sandbox.
         """
         if self._config.token_broker:
-            return NONO_PHANTOM_TOKEN
+            return NONO_PLACEHOLDER
         now = int(time.time())
         payload = {"iat": now - 60, "exp": now + 9 * 60, "iss": self._config.client_id}
         encoded = jwt.encode(payload, self._config.private_key, algorithm="RS256")
@@ -85,7 +85,7 @@ class GitHubAppAuth:
     def _brokered_token(self, installation_id: str) -> InstallationToken:
         """Return the placeholder token with no network call; the broker injects the real one."""
         return InstallationToken(
-            token=NONO_PHANTOM_TOKEN,
+            token=NONO_PLACEHOLDER,
             expires_at=datetime.now(timezone.utc) + _BROKERED_TOKEN_LIFETIME,
             installation_id=installation_id,
             client_id=self._config.client_id,

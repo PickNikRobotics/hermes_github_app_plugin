@@ -15,7 +15,7 @@ from hermes_github_app_plugin.auth import (
     repo_from_path,
     requires_app_jwt,
 )
-from hermes_github_app_plugin.config import NONO_PHANTOM_TOKEN, GitHubAppConfig
+from hermes_github_app_plugin.config import NONO_PLACEHOLDER, GitHubAppConfig
 
 PRIVATE_KEY = "[REDACTED PRIVATE KEY]\n"
 
@@ -167,7 +167,7 @@ def test_broker_installation_token_makes_no_network_call() -> None:
 
     token = auth.get_installation_token(repo="ExampleInfra/automation-config")
 
-    assert token.token == NONO_PHANTOM_TOKEN
+    assert token.token == NONO_PLACEHOLDER
     assert token.installation_id == "789"
     assert token.app_slug == "hermes-test-agent"
     assert token.client_id == "123"
@@ -186,7 +186,7 @@ def test_broker_create_jwt_returns_placeholder_without_signing(
     monkeypatch.setattr("jwt.encode", fail_if_signing)
     client = httpx.Client(transport=httpx.MockTransport(_fail_on_network))
 
-    assert GitHubAppAuth(_broker_config(), client=client).create_jwt() == NONO_PHANTOM_TOKEN
+    assert GitHubAppAuth(_broker_config(), client=client).create_jwt() == NONO_PLACEHOLDER
 
 
 def test_broker_request_sends_placeholder_and_reports_broker() -> None:

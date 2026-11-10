@@ -1,5 +1,5 @@
 name: github-app
-version: 0.3.0
+version: 0.3.1
 description: "GitHub App identity integration for Hermes: per-agent app token minting, GitHub API tools, gh/git wrappers, CLI, and workflow skill."
 author: Hermes GitHub App Plugin Contributors
 provides_tools:

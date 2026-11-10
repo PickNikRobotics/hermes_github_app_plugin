@@ -11,7 +11,7 @@ import yaml
 
 from hermes_github_app_plugin import cli
 from hermes_github_app_plugin.auth import GitHubAppAuth
-from hermes_github_app_plugin.config import NONO_PHANTOM_TOKEN, GitHubAppConfig
+from hermes_github_app_plugin.config import NONO_PLACEHOLDER, GitHubAppConfig
 
 PRIVATE_KEY = "[REDACTED PRIVATE KEY]\n"
 
@@ -343,7 +343,7 @@ def test_doctor_token_broker_network_checks_send_placeholder(
 
     assert cli._doctor("OWNER/REPO", skip_network=False) == 0
 
-    assert seen_auth == [f"Bearer {NONO_PHANTOM_TOKEN}"] * 2
+    assert seen_auth == [f"Bearer {NONO_PLACEHOLDER}"] * 2
     output = capsys.readouterr().out
     assert "✓ installation token brokered by nono" in output
     assert "✓ /app API reachable: hermes-test-agent" in output
@@ -359,5 +359,5 @@ def test_token_command_in_broker_mode_prints_placeholder(
     assert cli.main(args) == 0
 
     captured = capsys.readouterr()
-    assert captured.out == f"{NONO_PHANTOM_TOKEN}\n"
+    assert captured.out == f"{NONO_PLACEHOLDER}\n"
     assert "the nono proxy injects it" in captured.err
