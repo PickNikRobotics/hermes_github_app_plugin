@@ -42,6 +42,7 @@ def github_app_status(params: dict[str, Any], **_: Any) -> str:
             "installation_ids": dict(config.installation_ids),
             "app_slug": config.app_slug,
             "private_key_source": config.private_key_source,
+            "token_broker": config.token_broker,
             "github_api_url": config.github_api_url,
             "scope_management": "github_app_installation",
         }

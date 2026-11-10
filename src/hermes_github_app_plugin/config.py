@@ -11,6 +11,11 @@ from typing import Any
 
 import yaml
 
+# Token brokers keep the private key outside the agent's sandbox. The broker injects real
+# credentials into outbound requests, so the agent only ever sends this placeholder.
+SUPPORTED_TOKEN_BROKERS: tuple[str, ...] = ("nono",)
+NONO_PHANTOM_TOKEN = "nono-phantom-github-app"
+
 
 class ConfigurationError(RuntimeError):
     """Raised when GitHub App configuration is missing or invalid."""
@@ -18,7 +23,10 @@ class ConfigurationError(RuntimeError):
 
 @dataclass(frozen=True)
 class GitHubAppConfig:
-    """Per-agent GitHub App configuration."""
+    """Per-agent GitHub App configuration.
+
+    In token broker mode `private_key` is empty and `token_broker` names the broker.
+    """
 
     client_id: str
     installation_id: str
@@ -27,6 +35,7 @@ class GitHubAppConfig:
     private_key_source: str
     app_slug: str | None = None
     github_api_url: str = "https://api.github.com"
+    token_broker: str | None = None
 
     def installation_id_for_repo(self, repo: str | None = None) -> str:
         """Return the installation ID for an optional OWNER/REPO target."""
@@ -118,6 +127,21 @@ def _parse_installation_ids(raw: Any) -> dict[str, str]:
     return result
 
 
+def parse_token_broker(raw: object, *, source: str) -> str | None:
+    """Normalize a token broker name; empty values mean no broker."""
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    if not text:
+        return None
+    if text not in SUPPORTED_TOKEN_BROKERS:
+        supported = ", ".join(SUPPORTED_TOKEN_BROKERS)
+        raise ConfigurationError(
+            f"unsupported token broker {str(raw)!r} from {source}; supported: {supported}"
+        )
+    return text
+
+
 def _read_private_key(section: Mapping[str, Any]) -> tuple[str, str]:
     inline_key = os.environ.get("GITHUB_APP_PRIVATE_KEY") or str(section.get("private_key", ""))
     if inline_key:
@@ -159,7 +183,16 @@ def load_config() -> GitHubAppConfig:
     if not installation_id:
         # Use a deterministic fallback for commands that cannot infer an OWNER/REPO.
         installation_id = next(iter(installation_ids.values()))
-    private_key, private_key_source = _read_private_key(section)
+    broker_env = os.environ.get("GITHUB_APP_TOKEN_BROKER")
+    token_broker = parse_token_broker(
+        broker_env or section.get("token_broker"),
+        source="GITHUB_APP_TOKEN_BROKER" if broker_env else "github_app.token_broker",
+    )
+    if token_broker:
+        # The private key never enters a brokered agent's environment; ignore any key settings.
+        private_key, private_key_source = "", f"token broker: {token_broker}"
+    else:
+        private_key, private_key_source = _read_private_key(section)
     return GitHubAppConfig(
         client_id=client_id,
         installation_id=installation_id,
@@ -169,4 +202,5 @@ def load_config() -> GitHubAppConfig:
         app_slug=os.environ.get("GITHUB_APP_SLUG") or section.get("app_slug"),
         github_api_url=os.environ.get("GITHUB_API_URL")
         or str(section.get("github_api_url", "https://api.github.com")).rstrip("/"),
+        token_broker=token_broker,
     )

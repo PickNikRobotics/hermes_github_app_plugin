@@ -36,6 +36,14 @@ After setup, run `hermes-github-app doctor --repo OWNER/REPO` to verify console 
 7. Expect comments, PRs, and API writes to appear as `<app-slug>[bot]`.
 8. Treat the GitHub App installation scope as the repository access boundary. The plugin does not maintain a separate local repository/owner allowlist.
 
+## Running inside nono (token broker mode)
+
+If `hermes-github-app doctor` reports `token broker: nono`, this agent runs in the nono sandbox. By design it holds no GitHub App private key and cannot obtain a real installation token.
+
+- Do not search for, copy, or request a private key or a real token. `hermes-github-app token` prints a placeholder; nono's proxy outside the sandbox injects the real credentials into GitHub requests.
+- `github_app_*` tools, `gh-app`, and `git-app` work as described above. Plain `gh` and HTTPS `git push` also work because the proxy injects credentials, so keep remotes HTTPS.
+- If `doctor` reports `HTTPS_PROXY set` as failed, the agent is not running inside nono and no credentials will be injected. Stop and report that. Do not fall back to local human credentials or SSH keys.
+
 ## Updating existing Hermes skills
 
 Patch any GitHub-related skill, cron prompt, or subagent instruction that mentions `gh`, `git push`, GitHub SSH remotes, or `@me` assumptions:
